@@ -12,3 +12,6 @@ local.properties
 # OS
 .DS_Store
 Thumbs.db
+# Release keystore
+app/release-keystore.jks
+
