@@ -45,7 +45,7 @@ class MainActivity : AppCompatActivity() {
         btnLaunch.setOnClickListener {
             statusText.text = "正在启动 Google 天气…"
             executor.execute {
-                val result = WeatherLauncher.launchViaShell()
+                val result = WeatherLauncher.launchViaShell(this@MainActivity)
                 runOnUiThread {
                     statusText.text = if (result.success) {
                         "已拉起 Google 原生天气页 ✓\n\n${result.diagnostic()}"

@@ -3,7 +3,7 @@ package com.leowood2000.weathershortcut
 import android.content.pm.PackageManager
 import android.util.Log
 import rikka.shizuku.Shizuku
-import java.util.concurrent.TimeUnit
+import java.io.BufferedReader
 
 /**
  * Shizuku 执行器：
@@ -11,14 +11,15 @@ import java.util.concurrent.TimeUnit
  * - 授权检测
  * - 运行身份识别（ADB shell / Root）
  * - 通过反射调用 newProcess 执行命令（Shizuku 13.x private API）
- *   官方推荐使用 IRemoteProcess / UserService，但那需要绑定 AIDL；
- *   当前方案作为务实 fallback，封装为独立模块便于以后替换。
- * - 完整 stdout/stderr + 超时
+ *   官方推荐使用 UserService / Binder 方案，后续应迁移。
+ * - 使用结束标记 + exit code 判定成功，不依赖 waitFor/exitValue
+ * - 真正的 timeout 检测（线程 alive → destroy → 失败）
  */
 object ShizukuExecutor {
 
     private const val TAG = "ShizukuExecutor"
     private const val EXEC_TIMEOUT_SEC = 5L
+    private const val EXIT_MARKER = "__GWS_EXIT_CODE__"
 
     /** Shizuku Binder 是否存活 */
     fun isBinderAlive(): Boolean = runCatching { Shizuku.pingBinder() }.getOrDefault(false)
@@ -48,8 +49,14 @@ object ShizukuExecutor {
 
     /**
      * 通过 Shizuku newProcess（反射）执行命令。
-     * 不依赖 waitFor()/exitValue()（Shizuku Process 包装类行为非标准），
-     * 改为靠 stdout/stderr 线程结束来判断执行完成。
+     *
+     * 成功判定策略：
+     * 1. 在命令末尾追加 `; echo "__GWS_EXIT_CODE__=$?"`
+     * 2. 等待 stdout 线程结束（流关闭 = 进程结束），带 timeout
+     * 3. 从完整 stdout 中提取结束标记和 exit code
+     * 4. 只有同时满足：发现完整结束标记 + exit code == 0 才判成功
+     * 5. 如果线程在 timeout 后仍 alive → destroy → 判超时失败
+     *
      * @param timeoutSec 超时秒数
      * @return 完整执行结果
      */
@@ -71,27 +78,35 @@ object ShizukuExecutor {
                 String::class.java
             )
             method.isAccessible = true
+
+            // 在命令末尾追加结束标记，用于获取真实 exit code
+            val wrappedCommand = "$command; echo $EXIT_MARKER=\$?"
+
             val proc = method.invoke(
                 null,
-                arrayOf("sh", "-c", command),
+                arrayOf("sh", "-c", wrappedCommand),
                 null,
                 null
             ) as Process
 
-            val stdoutText = StringBuilder()
+            val rawStdout = StringBuilder()
             val stderrText = StringBuilder()
 
-            // 读取 stdout/stderr 到各自 StringBuilder
+            // 读取完整 stdout（含结束标记行），读取完整 stderr
             val stdoutThread = Thread {
                 try {
-                    proc.inputStream.bufferedReader().useLines { it.forEach { line -> stdoutText.appendLine(line) } }
+                    BufferedReader(proc.inputStream.reader()).useLines {
+                        it.forEach { line -> rawStdout.appendLine(line) }
+                    }
                 } catch (e: Exception) {
                     Log.w(TAG, "stdout read ended: ${e.message}")
                 }
             }
             val stderrThread = Thread {
                 try {
-                    proc.errorStream.bufferedReader().useLines { it.forEach { line -> stderrText.appendLine(line) } }
+                    BufferedReader(proc.errorStream.reader()).useLines {
+                        it.forEach { line -> stderrText.appendLine(line) }
+                    }
                 } catch (e: Exception) {
                     Log.w(TAG, "stderr read ended: ${e.message}")
                 }
@@ -99,23 +114,60 @@ object ShizukuExecutor {
             stdoutThread.start()
             stderrThread.start()
 
-            // 等待线程结束（流关闭即代表进程结束），不调 waitFor/exitValue
+            // 等待 stdout 线程结束（流关闭 = 进程结束），带 timeout
             stdoutThread.join(timeoutSec * 1000)
-            stderrThread.join(500)
 
-            val out = stdoutText.toString().trim()
+            // 检查是否超时：stdout 线程仍 alive 说明进程没结束
+            if (stdoutThread.isAlive) {
+                Log.w(TAG, "exec timeout after ${timeoutSec}s, destroying process")
+                runCatching { proc.destroyForcibly() }
+                stdoutThread.join(500)
+                stderrThread.join(500)
+                return CommandResult(
+                    success = false,
+                    channel = Channel.SHIZUKU,
+                    exitCode = null,
+                    stdout = rawStdout.toString().trim(),
+                    stderr = stderrText.toString().trim(),
+                    error = "命令超时（${timeoutSec}s）"
+                )
+            }
+
+            // stdout 线程已结束，等 stderr 也结束
+            stderrThread.join(1000)
+
+            val fullOutput = rawStdout.toString()
             val err = stderrText.toString().trim()
 
-            // stdout 有内容 = 命令执行成功
-            // stderr 非空且 stdout 空 = 命令失败
-            val success = out.isNotEmpty()
+            // 从完整 stdout 中提取结束标记行
+            val markerRegex = Regex("$EXIT_MARKER=(\\d+)")
+            val markerMatch = markerRegex.find(fullOutput)
+
+            if (markerMatch == null) {
+                // 没有找到结束标记 — 进程异常终止或被 kill
+                Log.w(TAG, "exec: no exit marker found in stdout")
+                return CommandResult(
+                    success = false,
+                    channel = Channel.SHIZUKU,
+                    exitCode = null,
+                    stdout = fullOutput.trim(),
+                    stderr = err,
+                    error = "未找到结束标记（进程可能异常终止）"
+                )
+            }
+
+            val exitCode = markerMatch.groupValues[1].toInt()
+
+            // 移除结束标记行，得到纯净的 stdout
+            val cleanStdout = fullOutput.replace(markerRegex, "").trim().trimEnd()
+
             CommandResult(
-                success = success,
+                success = exitCode == 0,
                 channel = Channel.SHIZUKU,
-                exitCode = if (success) 0 else 1,
-                stdout = out,
+                exitCode = exitCode,
+                stdout = cleanStdout,
                 stderr = err,
-                error = if (!success && err.isNotEmpty()) err else null
+                error = if (exitCode != 0 && err.isNotEmpty()) err else null
             )
         } catch (e: Exception) {
             Log.e(TAG, "exec failed: ${e.javaClass.simpleName}: ${e.message}", e)

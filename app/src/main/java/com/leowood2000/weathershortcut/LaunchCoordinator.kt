@@ -28,10 +28,10 @@ object LaunchCoordinator {
 
     /** WeatherActivity 是否存在（通过 PackageManager 查询，即使 exported=false 也能查到） */
     fun activityExists(context: Context): Boolean = runCatching {
-        val info = context.packageManager.getActivityInfo(
+        context.packageManager.getActivityInfo(
             ComponentName(PKG, ACTIVITY), 0
         )
-        info != null
+        true
     }.getOrDefault(false)
 
     /**
@@ -69,11 +69,39 @@ object LaunchCoordinator {
     }
 
     /**
-     * 启动天气页：Root 优先 → Shizuku fallback。
-     * 返回最终结果（成功或失败最后一个通道的结果）。
+     * 启动天气页：前置检查 → Root 优先 → Shizuku fallback。
+     *
+     * 1. 检查 Google App 是否安装
+     * 2. 检查 WeatherActivity 是否存在
+     * 3. Root 通道 → 成功则返回
+     * 4. Shizuku 通道 → 成功则返回
+     * 5. 全部失败 → 返回最后一个通道的结果或"无可用通道"
+     *
+     * @param context 用于 PackageManager 检查
+     * @return 最终结果
      */
-    fun launchWeather(): CommandResult {
+    fun launchWeather(context: Context): CommandResult {
         Log.i(TAG, "launchWeather: 开始启动流程")
+
+        // 前置检查：Google App 是否安装
+        if (!isGoogleAppInstalled(context)) {
+            Log.w(TAG, "launchWeather: Google App 未安装")
+            return CommandResult(
+                success = false,
+                channel = Channel.NONE,
+                error = "Google App 未安装"
+            )
+        }
+
+        // 前置检查：WeatherActivity 是否存在
+        if (!activityExists(context)) {
+            Log.w(TAG, "launchWeather: WeatherActivity 不存在")
+            return CommandResult(
+                success = false,
+                channel = Channel.NONE,
+                error = "WeatherActivity 不存在（Google App 版本可能过旧或 Activity 名称已变更）"
+            )
+        }
 
         // Root 优先
         if (RootExecutor.isAvailable()) {

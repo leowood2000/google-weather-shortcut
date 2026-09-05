@@ -1,6 +1,7 @@
 package com.leowood2000.weathershortcut
 
 import android.app.Activity
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -19,21 +20,32 @@ class LaunchActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        overridePendingTransition(0, 0)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            overrideActivityTransition(OVERRIDE_TRANSITION_OPEN, 0, 0)
+            overrideActivityTransition(OVERRIDE_TRANSITION_CLOSE, 0, 0)
+        } else {
+            @Suppress("DEPRECATION")
+            overridePendingTransition(0, 0)
+        }
 
         executor.execute {
-            val result = LaunchCoordinator.launchWeather()
+            val result = LaunchCoordinator.launchWeather(this@LaunchActivity)
             mainHandler.post {
                 if (!result.success) {
                     val msg = when (result.channel) {
                         Channel.ROOT -> "Root 启动失败：${result.error ?: result.stderr.trim().take(80)}"
                         Channel.SHIZUKU -> "Shizuku 启动失败：${result.error ?: result.stderr.trim().take(80)}"
-                        Channel.NONE -> "需 Root 或 Shizuku 授权才能打开原生天气"
+                        Channel.NONE -> result.error ?: "需 Root 或 Shizuku 授权才能打开原生天气"
                     }
                     Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
                 }
                 finishAndRemoveTask()
-                overridePendingTransition(0, 0)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    overrideActivityTransition(OVERRIDE_TRANSITION_CLOSE, 0, 0)
+                } else {
+                    @Suppress("DEPRECATION")
+                    overridePendingTransition(0, 0)
+                }
             }
         }
     }

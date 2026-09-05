@@ -23,8 +23,9 @@ object WeatherLauncher {
     /**
      * 通过 shell (root/Shizuku) 拉起天气。
      * 必须在后台线程调用。
+     * @param context 用于 PackageManager 前置检查
      * @return 完整结果（包含成功/失败、通道、exitCode、stdout/stderr）
      */
-    fun launchViaShell(): CommandResult =
-        LaunchCoordinator.launchWeather()
+    fun launchViaShell(context: Context): CommandResult =
+        LaunchCoordinator.launchWeather(context)
 }
