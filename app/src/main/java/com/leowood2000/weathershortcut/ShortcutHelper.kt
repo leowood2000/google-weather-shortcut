@@ -37,10 +37,10 @@ object ShortcutHelper {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
 
-        val icon = Icon.createWithResource(activity, R.mipmap.ic_launcher)
+        val icon = Icon.createWithResource(activity, R.mipmap.ic_weather)
         val shortcut = ShortcutInfo.Builder(activity, SHORTCUT_ID)
             .setShortLabel("谷歌天气")
-            .setLongLabel("Google 天气（原生页）")
+            .setLongLabel("谷歌天气")
             .setIcon(icon)
             .setIntent(launchIntent)
             .build()
