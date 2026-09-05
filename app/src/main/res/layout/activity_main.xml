@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Google 天气快捷方式"
+        android:textSize="22sp"
+        android:textStyle="bold"
+        android:paddingBottom="8dp" />
+
+    <TextView
+        android:id="@+id/statusText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:fontFamily="monospace"
+        android:textSize="14sp"
+        android:paddingBottom="16dp" />
+
+    <Button
+        android:id="@+id/btnShizuku"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="授权 Shizuku（免 root）"
+        android:layout_marginBottom="8dp" />
+
+    <Button
+        android:id="@+id/btnLaunch"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="打开 Google 原生天气"
+        android:layout_marginBottom="8dp" />
+
+    <Button
+        android:id="@+id/btnPin"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="固定到桌面（创建快捷方式）" />
+
+</LinearLayout>
