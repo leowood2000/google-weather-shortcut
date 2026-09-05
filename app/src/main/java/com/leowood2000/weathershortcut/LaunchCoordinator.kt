@@ -18,7 +18,53 @@ object LaunchCoordinator {
     private const val TAG = "LaunchCoord"
     const val PKG = "com.google.android.googlequicksearchbox"
     const val ACTIVITY = "com.google.android.apps.search.weather.WeatherActivity"
-    private const val AM_START = "am start -n $PKG/$ACTIVITY"
+    // -W: 等待 Activity 启动结果，输出包含 Status 行
+    private const val AM_START = "am start -W -n $PKG/$ACTIVITY"
+
+    /** am start 启动失败的常见错误关键词 */
+    private val LAUNCH_ERROR_KEYWORDS = listOf(
+        "Error: Activity not started",
+        "Permission Denial",
+        "SecurityException",
+        "java.lang.SecurityException"
+    )
+
+    /**
+     * 验证 am start -W 的执行结果。
+     *
+     * 三重检查（兼容旧版 AOSP exit code==0 但实际失败的情况）：
+     * 1. exitCode == 0
+     * 2. 输出包含 "Status: ok"（am start -W 的成功标志）
+     * 3. 输出不含已知错误关键词
+     */
+    private fun verifyLaunchResult(result: CommandResult): CommandResult {
+        if (!result.success) return result
+
+        val combined = "${result.stdout}\n${result.stderr}"
+
+        // 检查错误关键词
+        val hasError = LAUNCH_ERROR_KEYWORDS.any { keyword ->
+            combined.contains(keyword, ignoreCase = true)
+        }
+
+        // 检查 Status: ok
+        val hasStatusOk = combined.contains("Status: ok", ignoreCase = true)
+
+        return if (hasError || !hasStatusOk) {
+            val reason = when {
+                hasError -> "am start 输出包含错误关键词"
+                !hasStatusOk -> "未找到 Status: ok"
+                else -> "未知"
+            }
+            Log.w(TAG, "verifyLaunchResult: 失败 - $reason\n  stdout: ${result.stdout.take(200)}\n  stderr: ${result.stderr.take(200)}")
+            result.copy(
+                success = false,
+                error = "$reason（exitCode=${result.exitCode}）"
+            )
+        } else {
+            result
+        }
+    }
 
     /** Google App 是否安装 */
     fun isGoogleAppInstalled(context: Context): Boolean = runCatching {
@@ -53,7 +99,8 @@ object LaunchCoordinator {
     fun diagnose(context: Context): DiagnosticInfo {
         val googleOk = isGoogleAppInstalled(context)
         val actOk = activityExists(context)
-        val rootOk = RootExecutor.isAvailable()
+        // 触发 Root 检测（结果通过 cachedState() 读取）
+        RootExecutor.isAvailable()
         val shizukuBinder = ShizukuExecutor.isBinderAlive()
         val shizukuGranted = if (shizukuBinder) ShizukuExecutor.isGranted() else false
         val shizukuIdentity = if (shizukuGranted) ShizukuExecutor.getIdentity() else ShizukuExecutor.ShizukuIdentity.UNAVAILABLE
@@ -106,7 +153,7 @@ object LaunchCoordinator {
         // Root 优先
         if (RootExecutor.isAvailable()) {
             Log.i(TAG, "launchWeather: 尝试 Root 通道")
-            val result = RootExecutor.exec(AM_START)
+            val result = verifyLaunchResult(RootExecutor.exec(AM_START, 8L))
             if (result.success) {
                 Log.i(TAG, "launchWeather: Root 通道成功")
                 return result
@@ -118,7 +165,7 @@ object LaunchCoordinator {
         // Shizuku fallback
         if (ShizukuExecutor.isGranted()) {
             Log.i(TAG, "launchWeather: 尝试 Shizuku 通道")
-            val result = ShizukuExecutor.exec(AM_START)
+            val result = verifyLaunchResult(ShizukuExecutor.exec(AM_START, 8L))
             if (result.success) {
                 Log.i(TAG, "launchWeather: Shizuku 通道成功")
                 return result
