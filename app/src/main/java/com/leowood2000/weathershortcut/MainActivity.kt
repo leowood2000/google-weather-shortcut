@@ -18,7 +18,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnPin: Button
     private lateinit var btnShizuku: Button
 
-    private val shizukuListener = object : Shizuku.OnPermissionRequestResultListener {
+    private val shizukuListener = object : Shizuku.OnRequestPermissionResultListener {
         override fun onRequestPermissionResult(requestCode: Int, grantResult: Int) {
             refreshStatus()
         }
@@ -51,7 +51,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        Shizuku.addOnPermissionRequestResultListener(shizukuListener)
+        Shizuku.addRequestPermissionResultListener(shizukuListener)
     }
 
     override fun onResume() {
@@ -61,7 +61,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        runCatching { Shizuku.removeOnPermissionRequestResultListener(shizukuListener) }
+        runCatching { Shizuku.removeRequestPermissionResultListener(shizukuListener) }
     }
 
     private fun refreshStatus() {

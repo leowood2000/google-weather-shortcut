@@ -35,22 +35,32 @@ object PermissionHelper {
         out.contains("uid=0")
     }.getOrDefault(false)
 
+    /**
+     * 通过 Shizuku 执行命令。
+     * Shizuku 13.x 的 newProcess 是 private（deprecated），通过反射调用。
+     */
+    private fun shizukuExec(cmd: String): Boolean = runCatching {
+        val method = Shizuku::class.java.getDeclaredMethod(
+            "newProcess",
+            Array<String>::class.java, Array<String>::class.java, String::class.java
+        )
+        method.isAccessible = true
+        val proc = method.invoke(null, arrayOf("sh", "-c", cmd), null, null) as Process
+        proc.waitFor() == 0
+    }.getOrDefault(false)
+
     /** 执行命令（优先 root，其次 Shizuku） */
     fun runCommand(command: String): Boolean {
         // 优先 root
         if (isRootAvailable()) {
             return runCatching {
                 val p = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
-                val code = p.waitFor()
-                code == 0
+                p.waitFor() == 0
             }.getOrDefault(false)
         }
         // 其次 Shizuku
         if (isShizukuGranted()) {
-            return runCatching {
-                val result = Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)
-                result.waitFor() == 0
-            }.getOrDefault(false)
+            return shizukuExec(command)
         }
         return false
     }

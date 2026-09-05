@@ -45,19 +45,8 @@ object ShortcutHelper {
             .setIntent(launchIntent)
             .build()
 
-        val callback = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            activity.getMainExecutor()
-        } else {
-            null
-        }
-
         return try {
-            if (callback != null) {
-                shortcutManager.requestPinShortcut(shortcut, callback) { }
-            } else {
-                @Suppress("DEPRECATION")
-                shortcutManager.requestPinShortcut(shortcut, null)
-            }
+            shortcutManager.requestPinShortcut(shortcut, null)
             true
         } catch (e: Exception) {
             Log.e(TAG, "pinShortcut failed", e)
