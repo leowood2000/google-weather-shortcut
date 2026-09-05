@@ -105,7 +105,14 @@ object ShizukuExecutor {
                 stdoutThread.join(1000)
                 stderrThread.join(1000)
 
-                val exitCode = proc.exitValue()
+                // Shizuku 的 Process 包装类可能存在 waitFor 返回 true 但 exitValue() 仍抛
+                // IllegalThreadStateException 的情况，用 try-catch 兜底
+                val exitCode = try {
+                    proc.exitValue()
+                } catch (e: IllegalThreadStateException) {
+                    Log.w(TAG, "exitValue() threw after waitFor, assuming exit 0: ${e.message}")
+                    0
+                }
                 CommandResult(
                     success = exitCode == 0,
                     channel = Channel.SHIZUKU,
