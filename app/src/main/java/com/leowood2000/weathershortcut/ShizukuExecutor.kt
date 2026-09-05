@@ -93,7 +93,7 @@ object ShizukuExecutor {
                 proc.destroyForcibly()
                 stdoutThread.join(500)
                 stderrThread.join(500)
-                return@try CommandResult(
+                CommandResult(
                     success = false,
                     channel = Channel.SHIZUKU,
                     exitCode = null,
@@ -101,19 +101,19 @@ object ShizukuExecutor {
                     stderr = stderrText.toString(),
                     error = "命令超时（${timeoutSec}s）"
                 )
+            } else {
+                stdoutThread.join(1000)
+                stderrThread.join(1000)
+
+                val exitCode = proc.exitValue()
+                CommandResult(
+                    success = exitCode == 0,
+                    channel = Channel.SHIZUKU,
+                    exitCode = exitCode,
+                    stdout = stdoutText.toString(),
+                    stderr = stderrText.toString()
+                )
             }
-
-            stdoutThread.join(1000)
-            stderrThread.join(1000)
-
-            val exitCode = proc.exitValue()
-            CommandResult(
-                success = exitCode == 0,
-                channel = Channel.SHIZUKU,
-                exitCode = exitCode,
-                stdout = stdoutText.toString(),
-                stderr = stderrText.toString()
-            )
         } catch (e: Exception) {
             Log.e(TAG, "exec failed: ${e.message}")
             CommandResult(

@@ -64,11 +64,10 @@ object RootExecutor {
             val finished = proc.waitFor(timeoutSec, TimeUnit.SECONDS)
             if (!finished) {
                 proc.destroyForcibly()
-                // 即使超时也等待读取线程结束
                 stdoutThread.join(500)
                 stderrThread.join(500)
-                // 超时说明 root 可能可用但命令卡住，不改变状态
-                return@try CommandResult(
+                // 超时：root 可能可用但命令卡住，不改变状态
+                CommandResult(
                     success = false,
                     channel = Channel.ROOT,
                     exitCode = null,
@@ -76,19 +75,19 @@ object RootExecutor {
                     stderr = stderrText.toString(),
                     error = "命令超时（${timeoutSec}s）"
                 )
+            } else {
+                stdoutThread.join(1000)
+                stderrThread.join(1000)
+
+                val exitCode = proc.exitValue()
+                CommandResult(
+                    success = exitCode == 0,
+                    channel = Channel.ROOT,
+                    exitCode = exitCode,
+                    stdout = stdoutText.toString(),
+                    stderr = stderrText.toString()
+                )
             }
-
-            stdoutThread.join(1000)
-            stderrThread.join(1000)
-
-            val exitCode = proc.exitValue()
-            CommandResult(
-                success = exitCode == 0,
-                channel = Channel.ROOT,
-                exitCode = exitCode,
-                stdout = stdoutText.toString(),
-                stderr = stderrText.toString()
-            )
         } catch (e: Exception) {
             Log.e(TAG, "exec failed: ${e.message}")
             // su 不存在等异常，标记为不可用
