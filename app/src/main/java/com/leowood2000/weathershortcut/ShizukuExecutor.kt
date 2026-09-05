@@ -88,25 +88,27 @@ object ShizukuExecutor {
             stdoutThread.start()
             stderrThread.start()
 
-            val finished = proc.waitFor(timeoutSec, TimeUnit.SECONDS)
-            if (!finished) {
-                proc.destroyForcibly()
-                stdoutThread.join(500)
-                stderrThread.join(500)
-                CommandResult(
-                    success = false,
-                    channel = Channel.SHIZUKU,
-                    exitCode = null,
-                    stdout = stdoutText.toString(),
-                    stderr = stderrText.toString(),
-                    error = "命令超时（${timeoutSec}s）"
-                )
-            } else {
+            // Shizuku 的 Process 包装类可能不标准：waitFor(timeout) 和 exitValue()
+            // 都可能抛 IllegalThreadStateException。用整体 try-catch 兜底，
+            // 只要 stdout 有内容就视为成功执行。
+            try {
+                val finished = proc.waitFor(timeoutSec, TimeUnit.SECONDS)
+                if (!finished) {
+                    proc.destroyForcibly()
+                    stdoutThread.join(500)
+                    stderrThread.join(500)
+                    return CommandResult(
+                        success = false,
+                        channel = Channel.SHIZUKU,
+                        exitCode = null,
+                        stdout = stdoutText.toString(),
+                        stderr = stderrText.toString(),
+                        error = "命令超时（${timeoutSec}s）"
+                    )
+                }
                 stdoutThread.join(1000)
                 stderrThread.join(1000)
 
-                // Shizuku 的 Process 包装类可能存在 waitFor 返回 true 但 exitValue() 仍抛
-                // IllegalThreadStateException 的情况，用 try-catch 兜底
                 val exitCode = try {
                     proc.exitValue()
                 } catch (e: IllegalThreadStateException) {
@@ -119,6 +121,21 @@ object ShizukuExecutor {
                     exitCode = exitCode,
                     stdout = stdoutText.toString(),
                     stderr = stderrText.toString()
+                )
+            } catch (e: IllegalThreadStateException) {
+                // waitFor() 本身也可能抛此异常
+                Log.w(TAG, "waitFor() threw IllegalThreadStateException: ${e.message}")
+                stdoutThread.join(500)
+                stderrThread.join(500)
+                // stdout 已有内容说明命令已执行完成
+                val out = stdoutText.toString()
+                CommandResult(
+                    success = out.isNotEmpty(),
+                    channel = Channel.SHIZUKU,
+                    exitCode = if (out.isNotEmpty()) 0 else null,
+                    stdout = out,
+                    stderr = stderrText.toString(),
+                    error = if (out.isEmpty()) "Process 异常且无输出" else null
                 )
             }
         } catch (e: Exception) {
