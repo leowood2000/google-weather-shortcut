@@ -4,9 +4,6 @@
     <!-- Shizuku: 免 root 通过 adb 授权调用 shell 命令 -->
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
 
-    <!-- 传统快捷方式（兼容旧 launcher） -->
-    <uses-permission android:name="com.android.launcher.permission.INSTALL_SHORTCUT" />
-
     <!-- Android 11+ 包可见性：需要声明才能查询其他应用 -->
     <queries>
         <!-- Google App -->
