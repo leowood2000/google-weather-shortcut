@@ -48,6 +48,8 @@ object ShizukuExecutor {
 
     /**
      * 通过 Shizuku newProcess（反射）执行命令。
+     * 不依赖 waitFor()/exitValue()（Shizuku Process 包装类行为非标准），
+     * 改为靠 stdout/stderr 线程结束来判断执行完成。
      * @param timeoutSec 超时秒数
      * @return 完整执行结果
      */
@@ -79,71 +81,48 @@ object ShizukuExecutor {
             val stdoutText = StringBuilder()
             val stderrText = StringBuilder()
 
+            // 读取 stdout/stderr 到各自 StringBuilder
             val stdoutThread = Thread {
-                proc.inputStream.bufferedReader().useLines { it.forEach { line -> stdoutText.appendLine(line) } }
+                try {
+                    proc.inputStream.bufferedReader().useLines { it.forEach { line -> stdoutText.appendLine(line) } }
+                } catch (e: Exception) {
+                    Log.w(TAG, "stdout read ended: ${e.message}")
+                }
             }
             val stderrThread = Thread {
-                proc.errorStream.bufferedReader().useLines { it.forEach { line -> stderrText.appendLine(line) } }
+                try {
+                    proc.errorStream.bufferedReader().useLines { it.forEach { line -> stderrText.appendLine(line) } }
+                } catch (e: Exception) {
+                    Log.w(TAG, "stderr read ended: ${e.message}")
+                }
             }
             stdoutThread.start()
             stderrThread.start()
 
-            // Shizuku 的 Process 包装类可能不标准：waitFor(timeout) 和 exitValue()
-            // 都可能抛 IllegalThreadStateException。用整体 try-catch 兜底，
-            // 只要 stdout 有内容就视为成功执行。
-            try {
-                val finished = proc.waitFor(timeoutSec, TimeUnit.SECONDS)
-                if (!finished) {
-                    proc.destroyForcibly()
-                    stdoutThread.join(500)
-                    stderrThread.join(500)
-                    return CommandResult(
-                        success = false,
-                        channel = Channel.SHIZUKU,
-                        exitCode = null,
-                        stdout = stdoutText.toString(),
-                        stderr = stderrText.toString(),
-                        error = "命令超时（${timeoutSec}s）"
-                    )
-                }
-                stdoutThread.join(1000)
-                stderrThread.join(1000)
+            // 等待线程结束（流关闭即代表进程结束），不调 waitFor/exitValue
+            stdoutThread.join(timeoutSec * 1000)
+            stderrThread.join(500)
 
-                val exitCode = try {
-                    proc.exitValue()
-                } catch (e: IllegalThreadStateException) {
-                    Log.w(TAG, "exitValue() threw after waitFor, assuming exit 0: ${e.message}")
-                    0
-                }
-                CommandResult(
-                    success = exitCode == 0,
-                    channel = Channel.SHIZUKU,
-                    exitCode = exitCode,
-                    stdout = stdoutText.toString(),
-                    stderr = stderrText.toString()
-                )
-            } catch (e: IllegalThreadStateException) {
-                // waitFor() 本身也可能抛此异常
-                Log.w(TAG, "waitFor() threw IllegalThreadStateException: ${e.message}")
-                stdoutThread.join(500)
-                stderrThread.join(500)
-                // stdout 已有内容说明命令已执行完成
-                val out = stdoutText.toString()
-                CommandResult(
-                    success = out.isNotEmpty(),
-                    channel = Channel.SHIZUKU,
-                    exitCode = if (out.isNotEmpty()) 0 else null,
-                    stdout = out,
-                    stderr = stderrText.toString(),
-                    error = if (out.isEmpty()) "Process 异常且无输出" else null
-                )
-            }
+            val out = stdoutText.toString().trim()
+            val err = stderrText.toString().trim()
+
+            // stdout 有内容 = 命令执行成功
+            // stderr 非空且 stdout 空 = 命令失败
+            val success = out.isNotEmpty()
+            CommandResult(
+                success = success,
+                channel = Channel.SHIZUKU,
+                exitCode = if (success) 0 else 1,
+                stdout = out,
+                stderr = err,
+                error = if (!success && err.isNotEmpty()) err else null
+            )
         } catch (e: Exception) {
-            Log.e(TAG, "exec failed: ${e.message}")
+            Log.e(TAG, "exec failed: ${e.javaClass.simpleName}: ${e.message}", e)
             CommandResult(
                 success = false,
                 channel = Channel.SHIZUKU,
-                error = e.message ?: e.javaClass.simpleName
+                error = "${e.javaClass.simpleName}: ${e.message}"
             )
         }
     }
